@@ -42,6 +42,7 @@ To use the Distributed Data Parallel (DDP) implementation, follow these steps:
 ## Lessons Learned
 
 1. [Introduction to DDP](docs/Introduction.md)
+2. [Optimizing Distributed Data Parallel Training](docs/Optimization.md)
 
 ## References
 
@@ -53,3 +54,4 @@ To use the Distributed Data Parallel (DDP) implementation, follow these steps:
   - [PyTorch DDP YouTube Playlist](https://youtube.com/playlist?list=PL_lsbAsL_o2CSuhUhJIiW0IkdT5C2wGWj&si=zUqlm1ExG3nq6Jni)
 - [Advanced PyTorch](https://apxml.com/courses/advanced-pytorch)
 - [Distributed Data Parallel - Geeks for Geeks](https://www.geeksforgeeks.org/deep-learning/distributed-data-parallel/)
+- [PyTorch Distributed: Experiences on Accelerating Data Parallel Training](https://arxiv.org/abs/2006.15704)
