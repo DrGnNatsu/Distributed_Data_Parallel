@@ -39,13 +39,13 @@ In a naive solution, the model must finish the backward pass on each device befo
 The naive solution is visualized in the following figure:
 
 ```text
- Forward          Backward         Wait   Communication
-Time       0    1    2    3    4    5    6    7    8    9    10   11   12
- │────│────│────│────│────│────│────│────│────│────│────│────│
-GPU 0      ████████████│████████████████████│░░░░░░░│████████
-GPU 1      ████████████│████████████████████████████│████████
-GPU 2      ████████████│████████████████████████│░░░│████████
-GPU 3      ████████████│████████████████████████████│████████
+              Forward          Backward    Wait  Communication
+Time   0  1  2  3  4  5  6  7  8  9  10
+│────│────│────│────│────│────│────│────│────│────│────│────│
+GPU 0   ████████████│████████████████████│░░░░░░░│████████
+GPU 1   ████████████│████████████████████████████│████████
+GPU 2   ████████████│████████████████████████│░░░│████████
+GPU 3   ████████████│████████████████████████████│████████
  ▲
  │
  slowest GPU
@@ -57,7 +57,7 @@ GPU 3      ████████████│█████████
 - ████ = Backward
 - ░░░░ = GPU idle / waiting
 - ████ = Communication
-The vertical marker shows the synchronization point.
+  The vertical marker shows the synchronization point.
 
 #### Gradient Bucketing
 
@@ -78,6 +78,22 @@ The `all-reduce` operation can run concurrently with the backward pass. With the
 
 **CODE:** Algorithm 1: Distributed Data Parallel, page 5, arXiv:2006.15704
 
+#### Gradient Accumulation
+
+One technique in DDP to speed up training is to reduce the gradient synchronization frequency. Instead of launching the `all-reduce` operation at every iteration, we can accumulate gradients for multiple iterations (`n` local training steps) and then launch the `all-reduce` operation.
+
+**Use cases:** This is helpful in cases where the batch is too large and cannot fit into the GPU memory. The batch can be split into `n` smaller batches, and the gradients can be accumulated for each smaller batch. After `n` iterations, the `all-reduce` operation can be launched to synchronize the gradients across all devices. This technique can reduce the communication overhead and improve training throughput. Theoretically, this should produce the same results as if all data in the large batch is processed in one shot, as gradients will simply be accumulated to the same tensor.
+
+However, this technique conflicts with the `gradient reduction` technique. Moreover, DDP cannot distinguish whether the application plans to immediately invoke `optimizer.step()` after backward or accumulate gradients through multiple iterations. Therefore, we need to introduce one additional interface (i.e., `no_sync`) for this use case.
+
+### Communication Collectives
+
+The connections between devices use point-to-point communication, and the communication collectives are built on top of these connections. There are three main communication collectives used in DDP:
+
+1. _Gloo_: A collective communications library that supports CPU and GPU communication. It is optimized for low-latency and high-throughput communication.
+2. _NCCL_: A collective communications library that supports GPU communication. It is optimized for high-bandwidth and low-latency communication on NVIDIA GPUs.
+3. _MPI_: A message-passing interface that supports CPU and GPU communication. It is optimized for high-performance computing clusters.
+
 ## Extended Information
 
 In the research paper (arXiv:2006.15704), the authors proposed two ways to update the model parameters:
@@ -86,10 +102,10 @@ In the research paper (arXiv:2006.15704), the authors proposed two ways to updat
 2. **Parameter Averaging**: In this approach, the model computes gradients on each worker and then updates the model parameters on each worker independently. After that, the model parameters are averaged across all workers (0 to N-1 devices/GPUs), typically using an all-reduce operation (average parameters).
     - This method has a problem: the results of distributed training are not mathematically equivalent to local training, because the local optimizer states or optimizer depends on the local past gradients (e.g., momentum, adaptive learning rates). Also, the structure of parameter averaging orchestrates computation (i.e., backward pass) and communication (i.e., computing average) into non-overlapping phases, using optimizer `step()` functions as a hard separation point. Regardless of how vigorously we optimize the computation or communication, one type of resource will stay idle at any given time instance, giving up a substantial performance optimization opportunity.
 
-|                                    | Synchronizing Gradients                                                                     | Parameters Averaging                                                                                                                                 |
-|------------------------------------|---------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
-| What gets combined?                | Gradients, before the optimizer step                                                        | Updated model parameters, after local optimizer steps                                                                                                |
-| What does each worker update with? | The same combined gradient                                                                  | Its own local gradient                                                                                                                               |
-| Do workers stay aligned?           | They apply the same gradient to the same starting parameters, so their updates stay aligned | Their local optimizer states and updates can diverge; averaging weights does not necessarily make this equivalent to one update on the combined data |
+|                                    | Synchronizing Gradients                                                                     | Parameters Averaging                                  |
+|------------------------------------|---------------------------------------------------------------------------------------------|-------------------------------------------------------|
+| What gets combined?                | Gradients, before the optimizer step                                                        | Updated model parameters, after local optimizer steps |
+| What does each worker update with? | The same combined gradient                                                                  | Its own local gradient                                |
+| Do workers stay aligned?           | They apply the same gradient to the same starting parameters, so their updates stay aligned | Their local optimizer states and updates can diverge  |
 
 The research paper (arXiv:2006.15704) prefers the first approach (Synchronizing Gradients) because it is mathematically equivalent to local training, while the second approach (Parameter Averaging) is not. The paper also provides a theoretical analysis of the convergence of both approaches and shows that Synchronizing Gradients has better convergence properties than Parameters Averaging.
